@@ -15,7 +15,6 @@ type Config struct {
     Server   ServerConfig   `koanf:"server" validate:"required"`
     Database DatabaseConfig `koanf:"database" validate:"required"`
     Logging  LoggingConfig    `koanf:"logging" validate:"required"`
-    Auth     AuthConfig `koanf:"auth" validate:"required"` 
 }
 
 type Primary struct{
@@ -43,13 +42,10 @@ type DatabaseConfig struct {
 	ConnMaxIdleTime int    `koanf:"conn_max_idle_time" validate:"required"`
 }
 
-type AuthConfig struct {
-	SecretKey string `koanf:"secret_key" validate:"required"`
-}
-
 
 type LoggingConfig struct {
 	Level              string        `koanf:"level" validate:"required"`
+    Format             string       `koanf:"format" validate:"required"`
 }
 
 

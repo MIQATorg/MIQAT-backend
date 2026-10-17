@@ -1,0 +1,27 @@
+primary:
+  env: development # development or production
+
+server:
+  port: ":8080"
+  read_timeout: 15
+  write_timeout: 15
+  idle_timeout: 60
+  cors_allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:5173"
+
+database:
+  host: localhost
+  port: 5432
+  user: miqat
+  password: "password" # Set this through an environment variable or secret manager in production
+  name: miqat
+  ssl_mode: disable
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime: 300
+  conn_max_idle_time: 60
+
+logging:
+  level: debug # debug, info, warn, error
+  format: text # text or json

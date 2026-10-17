@@ -1,0 +1,4216 @@
+openapi: 3.0.3
+info:
+  title: MIQAT API
+  version: 1.0.0
+  description: "Design-first REST API contract for MIQAT, an offline-first, self-hostable time-tracking application.\n\n##
+    Conventions\n\n- IDs are UUIDv7. Clients generate them for synced resources and send `id` on create; repeating a create
+    with the\n  same `id` and content returns the existing resource. Groups are the exception: the server generates their
+    ids.\n- Timestamps are RFC 3339 in UTC.\n- Each resource has three request shapes: `<X>Create` (POST: id + fields), `<X>Fields`
+    (PUT: full replace; omitted\n  optional fields reset to their defaults) and `<X>Patch` (PATCH: only supplied fields change;
+    `null` clears).\n  Server-managed fields (`user_id`, `created_at`, `updated_at`, `deleted_at`, parent ids) appear only
+    in responses.\n- Deletes are soft deletes that create tombstones for sync. Deleting a project deletes its tasks; deleting
+    a work\n  session deletes its time entries.\n- List endpoints use opaque cursor pagination (`cursor`, `limit`) and return
+    `items` and `next_cursor`.\n- PATCH and POST actions (stop, end, join, create group) require an `Idempotency-Key` header.\n\
+    - Sync pulls changes by the server-assigned `server_version`; `410 Gone` when the cursor is older than the 90-day\n  tombstone
+    window.\n- Rate-limit tiers (provisional): Light ~300/min, Moderate ~60/min, Severe ~5/min, per account (per IP for auth).\n"
+servers:
+- url: /api/v1
+  description: API base path (adjust to deployment)
+tags:
+- name: Auth
+- name: Projects
+- name: Tasks
+- name: Labels
+- name: Work sessions
+- name: Time entries
+- name: Time-blocking templates
+- name: Detection
+- name: Groups
+- name: Settings
+- name: Sync
+- name: Operational
+paths:
+  /auth/register:
+    post:
+      operationId: register
+      summary: Register
+      tags:
+      - Auth
+      description: Create a local account (hashed password) and log this device in. 409 if the username is taken. Also 
+        creates the user's settings row with defaults.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security: []
+      x-rate-limit-tier: Severe
+      x-rate-limit-requests-per-minute: 5
+  /auth/login:
+    post:
+      operationId: login
+      summary: Log in
+      tags:
+      - Auth
+      description: Exchange username and password for a bearer token. Creates a login session for this device.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security: []
+      x-rate-limit-tier: Severe
+      x-rate-limit-requests-per-minute: 5
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Log out this device
+      tags:
+      - Auth
+      description: Revoke the access token used for this request (sets login_sessions.revoked_at). Repeating returns 
+        401.
+      responses:
+        '204':
+          description: Successful response
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /me:
+    get:
+      operationId: getMe
+      summary: Get current user
+      tags:
+      - Auth
+      description: The user the access token belongs to. Clients call it on start to check the token is still valid.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /projects:
+    get:
+      operationId: listProjects
+      summary: List projects
+      tags:
+      - Projects
+      description: Cursor-paginated list of the caller's non-deleted resources.
+      parameters:
+      - $ref: '#/components/parameters/cursor'
+      - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    post:
+      operationId: createProject
+      summary: Create project
+      tags:
+      - Projects
+      description: Create with a client-generated UUIDv7 in `id`. Repeating the same `id` with the same content returns 
+        the existing resource (201); different content returns 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /projects/{project}:
+    get:
+      operationId: getProject
+      summary: Get project
+      tags:
+      - Projects
+      description: Get project
+      parameters:
+      - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    put:
+      operationId: replaceProject
+      summary: Replace project
+      tags:
+      - Projects
+      description: Full replacement of the writable fields. Omitted optional fields reset to their defaults.
+      parameters:
+      - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectFields'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    patch:
+      operationId: patchProject
+      summary: Modify project
+      tags:
+      - Projects
+      description: 'Partial update: only supplied fields change. Send `null` to clear a nullable field.'
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/projectId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectPatch'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    delete:
+      operationId: deleteProject
+      summary: Delete project
+      tags:
+      - Projects
+      description: Soft-delete the project, its tasks and its detection rules; emits tombstones for each. Work sessions 
+        and time entries are kept as history and still reference the deleted project and tasks. New sessions, tasks and 
+        rules on a deleted project return 404. Repeating the delete returns 204.
+      parameters:
+      - $ref: '#/components/parameters/projectId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /projects/{project}/tasks:
+    get:
+      operationId: listProjectTasks
+      summary: List tasks in a project
+      tags:
+      - Tasks
+      description: List tasks in a project
+      parameters:
+      - $ref: '#/components/parameters/projectId'
+      - $ref: '#/components/parameters/cursor'
+      - $ref: '#/components/parameters/limit'
+      - name: completed
+        in: query
+        required: false
+        schema:
+          type: boolean
+        description: true = only completed tasks, false = only open tasks; omit for both.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    post:
+      operationId: createProjectTask
+      summary: Create a task in a project
+      tags:
+      - Tasks
+      description: Create a task with a client-generated UUIDv7. The project comes from the path and cannot change 
+        later.
+      parameters:
+      - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreate'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /tasks/{task}:
+    get:
+      operationId: getTask
+      summary: Get task
+      tags:
+      - Tasks
+      description: Get task
+      parameters:
+      - $ref: '#/components/parameters/taskId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    put:
+      operationId: replaceTask
+      summary: Replace task
+      tags:
+      - Tasks
+      description: Full replacement of the writable fields. Omitted optional fields reset to their defaults.
+      parameters:
+      - $ref: '#/components/parameters/taskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskFields'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    patch:
+      operationId: patchTask
+      summary: Modify task
+      tags:
+      - Tasks
+      description: 'Partial update: only supplied fields change. Send `null` to clear a nullable field.'
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/taskId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskPatch'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    delete:
+      operationId: deleteTask
+      summary: Delete task
+      tags:
+      - Tasks
+      description: 'Soft-delete: sets `deleted_at` and emits a tombstone for sync. Repeating the delete returns 204.'
+      parameters:
+      - $ref: '#/components/parameters/taskId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /labels:
+    get:
+      operationId: listLabels
+      summary: List labels
+      tags:
+      - Labels
+      description: Cursor-paginated list of the caller's non-deleted resources.
+      parameters:
+      - $ref: '#/components/parameters/cursor'
+      - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    post:
+      operationId: createLabel
+      summary: Create label
+      tags:
+      - Labels
+      description: Create with a client-generated UUIDv7 in `id`. Repeating the same `id` with the same content returns 
+        the existing resource (201); different content returns 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LabelCreate'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Label'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /labels/{label}:
+    get:
+      operationId: getLabel
+      summary: Get label
+      tags:
+      - Labels
+      description: Get label
+      parameters:
+      - $ref: '#/components/parameters/labelId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Label'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    put:
+      operationId: replaceLabel
+      summary: Replace label
+      tags:
+      - Labels
+      description: Full replacement of the writable fields. Omitted optional fields reset to their defaults.
+      parameters:
+      - $ref: '#/components/parameters/labelId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LabelFields'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Label'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    patch:
+      operationId: patchLabel
+      summary: Modify label
+      tags:
+      - Labels
+      description: 'Partial update: only supplied fields change. Send `null` to clear a nullable field.'
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/labelId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LabelPatch'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Label'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    delete:
+      operationId: deleteLabel
+      summary: Delete label
+      tags:
+      - Labels
+      description: Soft-delete the label and detach it from every task; each affected task gets a new server_version so 
+        the change syncs as a task upsert. Repeating the delete returns 204.
+      parameters:
+      - $ref: '#/components/parameters/labelId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /tasks/{task}/labels/{label}:
+    put:
+      operationId: attachLabelToTask
+      summary: Attach label to task
+      tags:
+      - Labels
+      description: "Idempotent: attaching an already-attached label returns 204. Bumps the task's sync version."
+      parameters:
+      - $ref: '#/components/parameters/taskId'
+      - $ref: '#/components/parameters/labelId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    delete:
+      operationId: detachLabelFromTask
+      summary: Detach label from task
+      tags:
+      - Labels
+      description: "Idempotent: detaching an absent label returns 204. Bumps the task's sync version."
+      parameters:
+      - $ref: '#/components/parameters/taskId'
+      - $ref: '#/components/parameters/labelId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /work-sessions:
+    get:
+      operationId: listWorkSessions
+      summary: List work sessions
+      tags:
+      - Work sessions
+      description: Cursor-paginated list of the caller's non-deleted resources.
+      parameters:
+      - $ref: '#/components/parameters/cursor'
+      - $ref: '#/components/parameters/limit'
+      - name: open
+        in: query
+        required: false
+        schema:
+          type: boolean
+        description: true = only open sessions (ended_at is null); false = only finished.
+      - $ref: '#/components/parameters/from'
+      - $ref: '#/components/parameters/to'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkSessionPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    post:
+      operationId: createWorkSession
+      summary: Create work session
+      tags:
+      - Work sessions
+      description: Open a work session on a project with a client-generated UUIDv7. Several sessions may be open at 
+        once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkSessionCreate'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /work-sessions/{session}:
+    get:
+      operationId: getWorkSession
+      summary: Get work session
+      tags:
+      - Work sessions
+      description: Get work session
+      parameters:
+      - $ref: '#/components/parameters/sessionId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    put:
+      operationId: replaceWorkSession
+      summary: Replace work session
+      tags:
+      - Work sessions
+      description: Full replacement of the writable fields. Omitted optional fields reset to their defaults.
+      parameters:
+      - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkSessionFields'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    patch:
+      operationId: patchWorkSession
+      summary: Modify work session
+      tags:
+      - Work sessions
+      description: 'Partial update: only supplied fields change. Send `null` to clear a nullable field.'
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/sessionId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkSessionPatch'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    delete:
+      operationId: deleteWorkSession
+      summary: Delete work session
+      tags:
+      - Work sessions
+      description: Soft-delete the session and all its time entries; emits tombstones. Repeating the delete returns 204.
+      parameters:
+      - $ref: '#/components/parameters/sessionId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /work-sessions/{session}/end:
+    post:
+      operationId: endWorkSession
+      summary: End work session
+      tags:
+      - Work sessions
+      description: 'Set `ended_at` (default: now) and stop any running entry in the session with stop_reason `session_ended`.'
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/sessionId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EndRequest'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /time-entries:
+    get:
+      operationId: listTimeEntries
+      summary: List time entries
+      tags:
+      - Time entries
+      description: Cursor-paginated list of the caller's non-deleted resources.
+      parameters:
+      - $ref: '#/components/parameters/cursor'
+      - $ref: '#/components/parameters/limit'
+      - name: running
+        in: query
+        required: false
+        schema:
+          type: boolean
+        description: true = only running entries (ended_at is null).
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+        description: Only entries in this work session.
+      - $ref: '#/components/parameters/from'
+      - $ref: '#/components/parameters/to'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntryPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    post:
+      operationId: createTimeEntry
+      summary: Create time entry
+      tags:
+      - Time entries
+      description: Start a timer (or record a finished entry) in an open work session. Client-generated UUIDv7. 
+        `task_id`, when set, must belong to the session's project (400 otherwise).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeEntryCreate'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /time-entries/{timeEntry}:
+    get:
+      operationId: getTimeEntry
+      summary: Get time entry
+      tags:
+      - Time entries
+      description: Get time entry
+      parameters:
+      - $ref: '#/components/parameters/timeEntryId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    put:
+      operationId: replaceTimeEntry
+      summary: Replace time entry
+      tags:
+      - Time entries
+      description: Full replacement of the writable fields. Omitted optional fields reset to their defaults.
+      parameters:
+      - $ref: '#/components/parameters/timeEntryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeEntryFields'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    patch:
+      operationId: patchTimeEntry
+      summary: Modify time entry
+      tags:
+      - Time entries
+      description: 'Partial update: only supplied fields change. Send `null` to clear a nullable field.'
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/timeEntryId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeEntryPatch'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    delete:
+      operationId: deleteTimeEntry
+      summary: Delete time entry
+      tags:
+      - Time entries
+      description: 'Soft-delete: sets `deleted_at` and emits a tombstone for sync. Repeating the delete returns 204.'
+      parameters:
+      - $ref: '#/components/parameters/timeEntryId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /time-entries/{timeEntry}/stop:
+    post:
+      operationId: stopTimeEntry
+      summary: Stop timer
+      tags:
+      - Time entries
+      description: Stop a running entry. `ended_at` defaults to the server time; offline clients should send the time 
+        the user actually stopped. Stopping an already-stopped entry returns it unchanged.
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/timeEntryId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopTimeEntryRequest'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /time-entries/export:
+    get:
+      operationId: exportTimeEntries
+      summary: Export time entries
+      tags:
+      - Time entries
+      description: 'Stream one export file: text/csv for format=csv, application/json for format=json.'
+      parameters:
+      - name: format
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - csv
+          - json
+          default: csv
+      - $ref: '#/components/parameters/from'
+      - $ref: '#/components/parameters/to'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TimeEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Severe
+      x-rate-limit-requests-per-minute: 5
+  /time-block-templates:
+    get:
+      operationId: listTimeBlockTemplates
+      summary: List time-block templates
+      tags:
+      - Time-blocking templates
+      description: Cursor-paginated list of the caller's non-deleted resources.
+      parameters:
+      - $ref: '#/components/parameters/cursor'
+      - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeBlockTemplatePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    post:
+      operationId: createTimeBlockTemplate
+      summary: Create time-block template
+      tags:
+      - Time-blocking templates
+      description: Create with a client-generated UUIDv7 in `id`. Repeating the same `id` with the same content returns 
+        the existing resource (201); different content returns 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeBlockTemplateCreate'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeBlockTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /time-block-templates/{template}:
+    get:
+      operationId: getTimeBlockTemplate
+      summary: Get time-block template
+      tags:
+      - Time-blocking templates
+      description: Get time-block template
+      parameters:
+      - $ref: '#/components/parameters/templateId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeBlockTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    put:
+      operationId: replaceTimeBlockTemplate
+      summary: Replace time-block template
+      tags:
+      - Time-blocking templates
+      description: Full replacement of the writable fields. Omitted optional fields reset to their defaults.
+      parameters:
+      - $ref: '#/components/parameters/templateId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeBlockTemplateFields'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeBlockTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    patch:
+      operationId: patchTimeBlockTemplate
+      summary: Modify time-block template
+      tags:
+      - Time-blocking templates
+      description: 'Partial update: only supplied fields change. Send `null` to clear a nullable field.'
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/templateId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeBlockTemplatePatch'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeBlockTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    delete:
+      operationId: deleteTimeBlockTemplate
+      summary: Delete time-block template
+      tags:
+      - Time-blocking templates
+      description: 'Soft-delete: sets `deleted_at` and emits a tombstone for sync. Repeating the delete returns 204.'
+      parameters:
+      - $ref: '#/components/parameters/templateId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /locations:
+    get:
+      operationId: listLocations
+      summary: List locations
+      tags:
+      - Detection
+      description: Cursor-paginated list of the caller's non-deleted resources.
+      parameters:
+      - $ref: '#/components/parameters/cursor'
+      - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    post:
+      operationId: createLocation
+      summary: Create location
+      tags:
+      - Detection
+      description: Create with a client-generated UUIDv7 in `id`. Repeating the same `id` with the same content returns 
+        the existing resource (201); different content returns 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationCreate'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Location'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /locations/{location}:
+    get:
+      operationId: getLocation
+      summary: Get location
+      tags:
+      - Detection
+      description: Get location
+      parameters:
+      - $ref: '#/components/parameters/locationId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Location'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    put:
+      operationId: replaceLocation
+      summary: Replace location
+      tags:
+      - Detection
+      description: Full replacement of the writable fields. Omitted optional fields reset to their defaults.
+      parameters:
+      - $ref: '#/components/parameters/locationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationFields'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Location'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    patch:
+      operationId: patchLocation
+      summary: Modify location
+      tags:
+      - Detection
+      description: 'Partial update: only supplied fields change. Send `null` to clear a nullable field.'
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/locationId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationPatch'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Location'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    delete:
+      operationId: deleteLocation
+      summary: Delete location
+      tags:
+      - Detection
+      description: Soft-delete the location. 409 if a non-deleted detection rule still references it.
+      parameters:
+      - $ref: '#/components/parameters/locationId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /detection-rules:
+    get:
+      operationId: listDetectionRules
+      summary: List detection rules
+      tags:
+      - Detection
+      description: Cursor-paginated list of the caller's non-deleted resources.
+      parameters:
+      - $ref: '#/components/parameters/cursor'
+      - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionRulePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    post:
+      operationId: createDetectionRule
+      summary: Create detection rule
+      tags:
+      - Detection
+      description: Create with a client-generated UUIDv7 in `id`. Repeating the same `id` with the same content returns 
+        the existing resource (201); different content returns 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetectionRuleCreate'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /detection-rules/{detectionRule}:
+    get:
+      operationId: getDetectionRule
+      summary: Get detection rule
+      tags:
+      - Detection
+      description: Get detection rule
+      parameters:
+      - $ref: '#/components/parameters/detectionRuleId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    put:
+      operationId: replaceDetectionRule
+      summary: Replace detection rule
+      tags:
+      - Detection
+      description: Full replacement of the writable fields. Omitted optional fields reset to their defaults.
+      parameters:
+      - $ref: '#/components/parameters/detectionRuleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetectionRuleFields'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    patch:
+      operationId: patchDetectionRule
+      summary: Modify detection rule
+      tags:
+      - Detection
+      description: 'Partial update: only supplied fields change. Send `null` to clear a nullable field.'
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/detectionRuleId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetectionRulePatch'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    delete:
+      operationId: deleteDetectionRule
+      summary: Delete detection rule
+      tags:
+      - Detection
+      description: 'Soft-delete: sets `deleted_at` and emits a tombstone for sync. Repeating the delete returns 204.'
+      parameters:
+      - $ref: '#/components/parameters/detectionRuleId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /groups:
+    get:
+      operationId: listGroups
+      summary: List my groups
+      tags:
+      - Groups
+      description: Cursor-paginated list of groups the caller is a member of.
+      parameters:
+      - $ref: '#/components/parameters/cursor'
+      - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    post:
+      operationId: createGroup
+      summary: Create group
+      tags:
+      - Groups
+      description: Create a group. The server generates the id and invite code; the caller becomes owner and first 
+        member. Needs the server (cannot be created offline), so it is protected by Idempotency-Key instead of a client 
+        id.
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupFields'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /groups/{group}:
+    get:
+      operationId: getGroup
+      summary: Get group
+      tags:
+      - Groups
+      description: Get group
+      parameters:
+      - $ref: '#/components/parameters/groupId'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    put:
+      operationId: replaceGroup
+      summary: Replace group
+      tags:
+      - Groups
+      description: Full replacement of the writable fields. Omitted optional fields reset to their defaults. Owner only;
+        other members receive 403.
+      parameters:
+      - $ref: '#/components/parameters/groupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupFields'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    patch:
+      operationId: patchGroup
+      summary: Modify group
+      tags:
+      - Groups
+      description: 'Partial update: only supplied fields change. Send `null` to clear a nullable field. Owner only; other
+        members receive 403.'
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/groupId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupPatch'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    delete:
+      operationId: deleteGroup
+      summary: Delete group
+      tags:
+      - Groups
+      description: Soft-delete the group and all memberships. Repeating the delete returns 204. Owner only; other 
+        members receive 403.
+      parameters:
+      - $ref: '#/components/parameters/groupId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /groups/{group}/members:
+    get:
+      operationId: listGroupMembers
+      summary: List group members
+      tags:
+      - Groups
+      description: Members only; non-members receive 403.
+      parameters:
+      - $ref: '#/components/parameters/groupId'
+      - $ref: '#/components/parameters/cursor'
+      - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMemberPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    post:
+      operationId: joinGroup
+      summary: Join group
+      tags:
+      - Groups
+      description: Join with the group's invite code (403 if wrong). Rejoining reuses the old membership. Severe rate 
+        limit discourages brute-forcing invite codes.
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/groupId'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinGroupRequest'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Severe
+      x-rate-limit-requests-per-minute: 5
+  /groups/{group}/members/me:
+    delete:
+      operationId: leaveGroup
+      summary: Leave group
+      tags:
+      - Groups
+      description: Leave the group. The owner cannot leave (409) until ownership is transferred or the group is deleted.
+      parameters:
+      - $ref: '#/components/parameters/groupId'
+      responses:
+        '204':
+          description: Successful response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /me/settings:
+    get:
+      operationId: getMySettings
+      summary: Get my settings
+      tags:
+      - Settings
+      description: Get my settings
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    put:
+      operationId: replaceMySettings
+      summary: Replace my settings
+      tags:
+      - Settings
+      description: Full replacement. Omitted fields reset to their defaults.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsFields'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+    patch:
+      operationId: patchMySettings
+      summary: Modify my settings
+      tags:
+      - Settings
+      description: Only supplied settings change. Send `null` to turn a nullable setting off.
+      x-idempotency:
+        header: Idempotency-Key
+        behavior: Replay the stored response for a repeated key.
+      parameters:
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsPatch'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+  /sync:
+    get:
+      operationId: getSyncChanges
+      summary: Get sync changes
+      tags:
+      - Sync
+      description: 'Changes across all synced entity types, ordered by server_version. Page until next_cursor is null. 410
+        if `since` is older than the 90-day tombstone window: wipe local data and re-pull without `since`.'
+      parameters:
+      - name: since
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+        description: Last saved server_version. Omit for a full initial sync.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 500
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Moderate
+      x-rate-limit-requests-per-minute: 60
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness check
+      tags:
+      - Operational
+      description: 'Public: is the server up.'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security: []
+      x-rate-limit-tier: None
+      x-rate-limit-requests-per-minute: null
+  /health/debug:
+    get:
+      operationId: getHealthDebug
+      summary: Diagnostics
+      tags:
+      - Operational
+      description: Admin only; other users receive 403. Database status, version, uptime.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DebugHealthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+      - BearerAuth: []
+      x-rate-limit-tier: Light
+      x-rate-limit-requests-per-minute: 300
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Opaque access token from register/login.
+  parameters:
+    projectId:
+      name: project
+      in: path
+      required: true
+      description: Project UUID.
+      schema:
+        type: string
+        format: uuid
+    taskId:
+      name: task
+      in: path
+      required: true
+      description: Task UUID.
+      schema:
+        type: string
+        format: uuid
+    labelId:
+      name: label
+      in: path
+      required: true
+      description: Label UUID.
+      schema:
+        type: string
+        format: uuid
+    sessionId:
+      name: session
+      in: path
+      required: true
+      description: Work-session UUID.
+      schema:
+        type: string
+        format: uuid
+    timeEntryId:
+      name: timeEntry
+      in: path
+      required: true
+      description: Time-entry UUID.
+      schema:
+        type: string
+        format: uuid
+    templateId:
+      name: template
+      in: path
+      required: true
+      description: Time-block template UUID.
+      schema:
+        type: string
+        format: uuid
+    locationId:
+      name: location
+      in: path
+      required: true
+      description: Location UUID.
+      schema:
+        type: string
+        format: uuid
+    detectionRuleId:
+      name: detectionRule
+      in: path
+      required: true
+      description: Detection-rule UUID.
+      schema:
+        type: string
+        format: uuid
+    groupId:
+      name: group
+      in: path
+      required: true
+      description: Group UUID.
+      schema:
+        type: string
+        format: uuid
+    cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Opaque cursor from the previous page. Omit on the first page.
+    limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    from:
+      name: from
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+      description: started_at >= from.
+    to:
+      name: to
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+      description: started_at < to.
+    idempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Client-generated UUID. A repeated key replays the stored response.
+  schemas:
+    Error:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+              example: not_found
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+    UserRole:
+      type: string
+      enum:
+      - user
+      - admin
+    Platform:
+      type: string
+      enum:
+      - android
+      - ios
+      - web
+      - linux
+      - windows
+    EntryKind:
+      type: string
+      enum:
+      - work
+      - break
+    StopReason:
+      type: string
+      enum:
+      - manual
+      - task_switch
+      - task_completed
+      - idle_timeout
+      - session_ended
+      - auto_stop
+      - detection
+      - phase_complete
+      description: "manual: user stopped it. task_switch: switched task. task_completed: task was completed. idle_timeout:
+        stopped after inactivity. session_ended: parent session ended. auto_stop: hit auto_stop_after_minutes. detection:
+        a detection rule's stop action. phase_complete: a Pomodoro phase ended."
+    DetectionAction:
+      type: string
+      enum:
+      - start
+      - stop
+    ActivityStatus:
+      type: string
+      enum:
+      - walking
+      - stationary
+    IdleAction:
+      type: string
+      enum:
+      - prompt
+      - pause
+      description: 'prompt: keep running and ask on return. pause: pause automatically and flag the entry for review.'
+    ParallelTimerAction:
+      type: string
+      enum:
+      - ask
+      - run_both
+      - pause_others
+    MemberRole:
+      type: string
+      enum:
+      - owner
+      - member
+    User:
+      type: object
+      required:
+      - id
+      - username
+      - display_name
+      - role
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        display_name:
+          type: string
+        role:
+          $ref: '#/components/schemas/UserRole'
+        created_at:
+          type: string
+          format: date-time
+    LoginRequest:
+      type: object
+      required:
+      - username
+      - password
+      - device_name
+      - platform
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          format: password
+          minLength: 1
+        device_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Pixel 8
+        platform:
+          $ref: '#/components/schemas/Platform'
+        app_version:
+          type: string
+          nullable: true
+          example: 1.0.0
+    RegisterRequest:
+      type: object
+      required:
+      - username
+      - display_name
+      - password
+      - device_name
+      - platform
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: ^[a-zA-Z0-9_.-]+$
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        password:
+          type: string
+          format: password
+          minLength: 8
+        timezone:
+          type: string
+          example: Africa/Cairo
+          description: IANA name from the device; seeds settings.
+        week_start:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: From the device locale; seeds settings.
+        device_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Pixel 8
+        platform:
+          $ref: '#/components/schemas/Platform'
+        app_version:
+          type: string
+          nullable: true
+          example: 1.0.0
+    AuthResponse:
+      type: object
+      required:
+      - access_token
+      - token_type
+      - expires_at
+      - login_session_id
+      - user
+      properties:
+        access_token:
+          type: string
+          description: Opaque token; only its SHA-256 is stored.
+        token_type:
+          type: string
+          enum:
+          - Bearer
+        expires_at:
+          type: string
+          format: date-time
+          description: 'Sliding: pushed forward on each use.'
+        login_session_id:
+          type: string
+          format: uuid
+        user:
+          $ref: '#/components/schemas/User'
+    ProjectFields:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        is_todo:
+          type: boolean
+          default: false
+          description: Project uses tasks (to-do style).
+        is_private:
+          type: boolean
+          default: true
+          description: false = visible to the owner's groups.
+        priority:
+          type: integer
+          default: 0
+    ProjectPatch:
+      type: object
+      description: 'Partial update: only supplied properties change.'
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        is_todo:
+          type: boolean
+          description: Project uses tasks (to-do style).
+        is_private:
+          type: boolean
+          description: false = visible to the owner's groups.
+        priority:
+          type: integer
+    ProjectCreate:
+      allOf:
+      - type: object
+        required:
+        - id
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: Client-generated UUIDv7.
+      - $ref: '#/components/schemas/ProjectFields'
+    Project:
+      allOf:
+      - $ref: '#/components/schemas/ProjectFields'
+      - type: object
+        required:
+        - id
+        - user_id
+        - created_at
+        - updated_at
+        - name
+        - is_todo
+        - is_private
+        - priority
+        - deleted_at
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: UUIDv7.
+          user_id:
+            type: string
+            format: uuid
+            description: Owner; set by the server from the access token.
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+            description: Set by the server on every write.
+          deleted_at:
+            type: string
+            format: date-time
+            nullable: true
+            description: Non-null on tombstones; normal reads never return deleted rows.
+    ProjectPage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor; null when no more pages.
+    TaskFields:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 500
+        priority:
+          type: integer
+          default: 0
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: null = not done.
+          default: null
+    TaskPatch:
+      type: object
+      description: 'Partial update: only supplied properties change.'
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 500
+        priority:
+          type: integer
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: null = not done.
+    TaskCreate:
+      allOf:
+      - type: object
+        required:
+        - id
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: Client-generated UUIDv7.
+      - $ref: '#/components/schemas/TaskFields'
+    Task:
+      allOf:
+      - $ref: '#/components/schemas/TaskFields'
+      - type: object
+        required:
+        - id
+        - user_id
+        - created_at
+        - updated_at
+        - project_id
+        - label_ids
+        - name
+        - priority
+        - completed_at
+        - deleted_at
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: UUIDv7.
+          user_id:
+            type: string
+            format: uuid
+            description: Owner; set by the server from the access token.
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+            description: Set by the server on every write.
+          deleted_at:
+            type: string
+            format: date-time
+            nullable: true
+            description: Non-null on tombstones; normal reads never return deleted rows.
+          project_id:
+            type: string
+            format: uuid
+            description: Set from the create path; immutable.
+          label_ids:
+            type: array
+            items:
+              type: string
+              format: uuid
+            description: Change with the attach/detach label endpoints.
+    TaskPage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor; null when no more pages.
+    LabelFields:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        color:
+          type: string
+          pattern: ^#[0-9A-Fa-f]{6}$
+          nullable: true
+          example: '#3B82F6'
+          default: null
+    LabelPatch:
+      type: object
+      description: 'Partial update: only supplied properties change.'
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        color:
+          type: string
+          pattern: ^#[0-9A-Fa-f]{6}$
+          nullable: true
+          example: '#3B82F6'
+    LabelCreate:
+      allOf:
+      - type: object
+        required:
+        - id
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: Client-generated UUIDv7.
+      - $ref: '#/components/schemas/LabelFields'
+    Label:
+      allOf:
+      - $ref: '#/components/schemas/LabelFields'
+      - type: object
+        required:
+        - id
+        - user_id
+        - created_at
+        - updated_at
+        - name
+        - color
+        - deleted_at
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: UUIDv7.
+          user_id:
+            type: string
+            format: uuid
+            description: Owner; set by the server from the access token.
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+            description: Set by the server on every write.
+          deleted_at:
+            type: string
+            format: date-time
+            nullable: true
+            description: Non-null on tombstones; normal reads never return deleted rows.
+    LabelPage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Label'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor; null when no more pages.
+    WorkSessionFields:
+      type: object
+      required:
+      - started_at
+      properties:
+        started_at:
+          type: string
+          format: date-time
+        planned_end_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the user expects to finish.
+          default: null
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: null = open. Must be after started_at.
+          default: null
+        needs_review:
+          type: boolean
+          default: false
+        time_blocking_template_id:
+          type: string
+          format: uuid
+          nullable: true
+          default: null
+    WorkSessionPatch:
+      type: object
+      description: 'Partial update: only supplied properties change.'
+      minProperties: 1
+      properties:
+        started_at:
+          type: string
+          format: date-time
+        planned_end_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the user expects to finish.
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: null = open. Must be after started_at.
+        needs_review:
+          type: boolean
+        time_blocking_template_id:
+          type: string
+          format: uuid
+          nullable: true
+    WorkSessionCreate:
+      allOf:
+      - type: object
+        required:
+        - id
+        - project_id
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: Client-generated UUIDv7.
+          project_id:
+            type: string
+            format: uuid
+      - $ref: '#/components/schemas/WorkSessionFields'
+    WorkSession:
+      allOf:
+      - $ref: '#/components/schemas/WorkSessionFields'
+      - type: object
+        required:
+        - id
+        - user_id
+        - created_at
+        - updated_at
+        - project_id
+        - started_at
+        - planned_end_at
+        - ended_at
+        - needs_review
+        - time_blocking_template_id
+        - deleted_at
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: UUIDv7.
+          user_id:
+            type: string
+            format: uuid
+            description: Owner; set by the server from the access token.
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+            description: Set by the server on every write.
+          deleted_at:
+            type: string
+            format: date-time
+            nullable: true
+            description: Non-null on tombstones; normal reads never return deleted rows.
+          project_id:
+            type: string
+            format: uuid
+            description: Set at creation; immutable.
+      description: Open + running entry = running; open + no running entry = paused; ended_at set = finished.
+    WorkSessionPage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkSession'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor; null when no more pages.
+    EndRequest:
+      type: object
+      properties:
+        ended_at:
+          type: string
+          format: date-time
+          description: Defaults to the server time.
+    TimeEntryFields:
+      type: object
+      required:
+      - started_at
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Must belong to the session's project. null for non-to-do projects.
+          default: null
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/EntryKind'
+          default: work
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: null = running. Must be after started_at.
+          default: null
+        idle_stop_time:
+          type: string
+          format: date-time
+          nullable: true
+          default: null
+          description: When idle was detected. If the user confirms, ended_at is set to this; otherwise ignored.
+        needs_review:
+          type: boolean
+          default: false
+        stop_reason:
+          allOf:
+          - $ref: '#/components/schemas/StopReason'
+          nullable: true
+          default: null
+          description: Set exactly when ended_at is set. If ended_at is set and this is omitted, the server uses 
+            `manual`; clearing ended_at clears it.
+    TimeEntryPatch:
+      type: object
+      description: 'Partial update: only supplied properties change.'
+      minProperties: 1
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Must belong to the session's project. null for non-to-do projects.
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/EntryKind'
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: null = running. Must be after started_at.
+        idle_stop_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: When idle was detected. If the user confirms, ended_at is set to this; otherwise ignored.
+        needs_review:
+          type: boolean
+        stop_reason:
+          allOf:
+          - $ref: '#/components/schemas/StopReason'
+          nullable: true
+          description: Set exactly when ended_at is set. If ended_at is set and this is omitted, the server uses 
+            `manual`; clearing ended_at clears it.
+    TimeEntryCreate:
+      allOf:
+      - type: object
+        required:
+        - id
+        - session_id
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: Client-generated UUIDv7.
+          session_id:
+            type: string
+            format: uuid
+      - $ref: '#/components/schemas/TimeEntryFields'
+    TimeEntry:
+      allOf:
+      - $ref: '#/components/schemas/TimeEntryFields'
+      - type: object
+        required:
+        - id
+        - user_id
+        - created_at
+        - updated_at
+        - session_id
+        - task_id
+        - kind
+        - started_at
+        - ended_at
+        - idle_stop_time
+        - needs_review
+        - stop_reason
+        - deleted_at
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: UUIDv7.
+          user_id:
+            type: string
+            format: uuid
+            description: Owner; set by the server from the access token.
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+            description: Set by the server on every write.
+          deleted_at:
+            type: string
+            format: date-time
+            nullable: true
+            description: Non-null on tombstones; normal reads never return deleted rows.
+          session_id:
+            type: string
+            format: uuid
+            description: Set at creation; immutable.
+    TimeEntryPage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeEntry'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor; null when no more pages.
+    StopTimeEntryRequest:
+      type: object
+      properties:
+        ended_at:
+          type: string
+          format: date-time
+          description: Defaults to the server time.
+        stop_reason:
+          allOf:
+          - $ref: '#/components/schemas/StopReason'
+          default: manual
+    Phase:
+      type: object
+      required:
+      - kind
+      - minutes
+      properties:
+        kind:
+          $ref: '#/components/schemas/EntryKind'
+        minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        label:
+          type: string
+          maxLength: 100
+    TimeBlockTemplateFields:
+      type: object
+      required:
+      - name
+      - phases
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        phases:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Phase'
+          description: Ordered phase list.
+        repeat_count:
+          type: integer
+          minimum: 1
+          nullable: true
+          default: null
+          description: null = repeat until stopped.
+        default_project_id:
+          type: string
+          format: uuid
+          nullable: true
+          default: null
+          description: Pre-selected when the block starts.
+    TimeBlockTemplatePatch:
+      type: object
+      description: 'Partial update: only supplied properties change.'
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        phases:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Phase'
+          description: Ordered phase list.
+        repeat_count:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: null = repeat until stopped.
+        default_project_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Pre-selected when the block starts.
+    TimeBlockTemplateCreate:
+      allOf:
+      - type: object
+        required:
+        - id
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: Client-generated UUIDv7.
+      - $ref: '#/components/schemas/TimeBlockTemplateFields'
+    TimeBlockTemplate:
+      allOf:
+      - $ref: '#/components/schemas/TimeBlockTemplateFields'
+      - type: object
+        required:
+        - id
+        - user_id
+        - created_at
+        - updated_at
+        - name
+        - phases
+        - repeat_count
+        - default_project_id
+        - deleted_at
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: UUIDv7.
+          user_id:
+            type: string
+            format: uuid
+            description: Owner; set by the server from the access token.
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+            description: Set by the server on every write.
+          deleted_at:
+            type: string
+            format: date-time
+            nullable: true
+            description: Non-null on tombstones; normal reads never return deleted rows.
+    TimeBlockTemplatePage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeBlockTemplate'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor; null when no more pages.
+    Coordinates:
+      type: object
+      required:
+      - latitude
+      - longitude
+      properties:
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+    LocationFields:
+      type: object
+      required:
+      - address_name
+      - coordinates
+      properties:
+        address_name:
+          type: string
+          minLength: 1
+          maxLength: 300
+        coordinates:
+          $ref: '#/components/schemas/Coordinates'
+    LocationPatch:
+      type: object
+      description: 'Partial update: only supplied properties change.'
+      minProperties: 1
+      properties:
+        address_name:
+          type: string
+          minLength: 1
+          maxLength: 300
+        coordinates:
+          $ref: '#/components/schemas/Coordinates'
+    LocationCreate:
+      allOf:
+      - type: object
+        required:
+        - id
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: Client-generated UUIDv7.
+      - $ref: '#/components/schemas/LocationFields'
+    Location:
+      allOf:
+      - $ref: '#/components/schemas/LocationFields'
+      - type: object
+        required:
+        - id
+        - user_id
+        - created_at
+        - updated_at
+        - address_name
+        - coordinates
+        - deleted_at
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: UUIDv7.
+          user_id:
+            type: string
+            format: uuid
+            description: Owner; set by the server from the access token.
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+            description: Set by the server on every write.
+          deleted_at:
+            type: string
+            format: date-time
+            nullable: true
+            description: Non-null on tombstones; normal reads never return deleted rows.
+    LocationPage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Location'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor; null when no more pages.
+    DetectionRuleFields:
+      type: object
+      required:
+      - action
+      - project_id
+      properties:
+        action:
+          $ref: '#/components/schemas/DetectionAction'
+        project_id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+          nullable: true
+          default: null
+          description: Must belong to project_id.
+        is_enabled:
+          type: boolean
+          default: true
+        min_speed:
+          type: number
+          format: float
+          minimum: 0
+          nullable: true
+          default: null
+          description: m/s.
+        wifi:
+          type: boolean
+          nullable: true
+          default: null
+          description: Wi-Fi on (true) or off (false).
+        wifi_ssid:
+          type: string
+          nullable: true
+          default: null
+          description: Network name. Not allowed when wifi is false.
+        location_id:
+          type: string
+          format: uuid
+          nullable: true
+          default: null
+          description: Set together with radius_meter.
+        radius_meter:
+          type: integer
+          minimum: 1
+          nullable: true
+          default: null
+          description: Set together with location_id.
+        activity_status:
+          allOf:
+          - $ref: '#/components/schemas/ActivityStatus'
+          nullable: true
+          default: null
+    DetectionRulePatch:
+      type: object
+      description: 'Partial update: only supplied properties change.'
+      minProperties: 1
+      properties:
+        action:
+          $ref: '#/components/schemas/DetectionAction'
+        project_id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Must belong to project_id.
+        is_enabled:
+          type: boolean
+        min_speed:
+          type: number
+          format: float
+          minimum: 0
+          nullable: true
+          description: m/s.
+        wifi:
+          type: boolean
+          nullable: true
+          description: Wi-Fi on (true) or off (false).
+        wifi_ssid:
+          type: string
+          nullable: true
+          description: Network name. Not allowed when wifi is false.
+        location_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set together with radius_meter.
+        radius_meter:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Set together with location_id.
+        activity_status:
+          allOf:
+          - $ref: '#/components/schemas/ActivityStatus'
+          nullable: true
+    DetectionRuleCreate:
+      allOf:
+      - type: object
+        required:
+        - id
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: Client-generated UUIDv7.
+      - $ref: '#/components/schemas/DetectionRuleFields'
+    DetectionRule:
+      allOf:
+      - $ref: '#/components/schemas/DetectionRuleFields'
+      - type: object
+        required:
+        - id
+        - user_id
+        - created_at
+        - updated_at
+        - action
+        - project_id
+        - task_id
+        - is_enabled
+        - min_speed
+        - wifi
+        - wifi_ssid
+        - location_id
+        - radius_meter
+        - activity_status
+        - deleted_at
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: UUIDv7.
+          user_id:
+            type: string
+            format: uuid
+            description: Owner; set by the server from the access token.
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+            description: Set by the server on every write.
+          deleted_at:
+            type: string
+            format: date-time
+            nullable: true
+            description: Non-null on tombstones; normal reads never return deleted rows.
+      description: 'All set conditions must match for the action to fire. Validated by the API (400): at least one condition
+        (min_speed, wifi, wifi_ssid, location_id, activity_status) is set; location_id and radius_meter are both set or both
+        null; wifi_ssid is null when wifi is false; task_id belongs to project_id.'
+    DetectionRulePage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DetectionRule'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor; null when no more pages.
+    GroupFields:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: BUE study group
+    GroupPatch:
+      type: object
+      description: 'Partial update: only supplied properties change.'
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: BUE study group
+    Group:
+      allOf:
+      - $ref: '#/components/schemas/GroupFields'
+      - type: object
+        required:
+        - id
+        - created_at
+        - updated_at
+        - invite_code
+        - my_role
+        - name
+        - deleted_at
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: UUIDv7.
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+            description: Set by the server on every write.
+          deleted_at:
+            type: string
+            format: date-time
+            nullable: true
+            description: Non-null on tombstones; normal reads never return deleted rows.
+          invite_code:
+            type: string
+            description: Share to let others join.
+          my_role:
+            $ref: '#/components/schemas/MemberRole'
+    GroupPage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Group'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor; null when no more pages.
+    GroupMember:
+      type: object
+      required:
+      - user_id
+      - display_name
+      - role
+      - joined_at
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        role:
+          $ref: '#/components/schemas/MemberRole'
+        joined_at:
+          type: string
+          format: date-time
+    GroupMemberPage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupMember'
+        next_cursor:
+          type: string
+          nullable: true
+    JoinGroupRequest:
+      type: object
+      required:
+      - invite_code
+      properties:
+        invite_code:
+          type: string
+          minLength: 1
+    SettingsFields:
+      type: object
+      properties:
+        timezone:
+          type: string
+          default: UTC
+          example: Africa/Cairo
+          description: IANA time zone name.
+        week_start:
+          type: integer
+          minimum: 0
+          maximum: 6
+          default: 6
+          description: 0 = Monday ... 6 = Sunday.
+        language:
+          type: string
+          default: en
+          description: Language of server-generated text (e.g. push notifications).
+        parallel_timer_action:
+          allOf:
+          - $ref: '#/components/schemas/ParallelTimerAction'
+          default: ask
+        detection_parallel_timer_action:
+          allOf:
+          - $ref: '#/components/schemas/ParallelTimerAction'
+          default: run_both
+        long_timer_reminder_minutes:
+          type: integer
+          minimum: 1
+          nullable: true
+          default: 180
+          description: Remind on all devices when a timer runs this long. null = off.
+        idle_threshold_minutes:
+          type: integer
+          minimum: 1
+          nullable: true
+          default: null
+          description: Minutes without activity that count as idle. null = idle detection off.
+        idle_action:
+          allOf:
+          - $ref: '#/components/schemas/IdleAction'
+          default: prompt
+        auto_stop_after_minutes:
+          type: integer
+          minimum: 1
+          nullable: true
+          default: null
+          description: 'Hard limit: stop any timer running this long. null = off.'
+        not_tracking_reminder:
+          type: boolean
+          default: true
+          description: Remind if nothing is tracked during active hours.
+        active_hours_start:
+          type: integer
+          minimum: 0
+          maximum: 1439
+          nullable: true
+          default: 540
+          description: Minutes after local midnight (540 = 09:00).
+        active_hours_end:
+          type: integer
+          minimum: 0
+          maximum: 1439
+          nullable: true
+          default: 1020
+          description: Minutes after local midnight (1020 = 17:00).
+        active_days:
+          type: integer
+          minimum: 0
+          maximum: 127
+          default: 79
+          description: 'Bitmask: bit 0 = Monday ... bit 6 = Sunday.'
+        auto_start_breaks:
+          type: boolean
+          default: true
+        auto_start_next_work:
+          type: boolean
+          default: false
+        notify_phase_end:
+          type: boolean
+          default: true
+          description: Push when a Pomodoro phase or countdown ends.
+        quiet_hours_start:
+          type: integer
+          minimum: 0
+          maximum: 1439
+          nullable: true
+          default: null
+          description: Minutes after local midnight; no pushes between start and end. null = off.
+        quiet_hours_end:
+          type: integer
+          minimum: 0
+          maximum: 1439
+          nullable: true
+          default: null
+          description: Minutes after local midnight.
+        share_running_timer:
+          type: boolean
+          default: false
+          description: Group members can see what I am tracking now.
+        client_prefs:
+          type: object
+          additionalProperties: true
+          nullable: true
+          default: null
+          description: Client-only cosmetic prefs (theme, default screen). Last write wins.
+    SettingsPatch:
+      type: object
+      description: 'Partial update: only supplied properties change.'
+      minProperties: 1
+      properties:
+        timezone:
+          type: string
+          example: Africa/Cairo
+          description: IANA time zone name.
+        week_start:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: 0 = Monday ... 6 = Sunday.
+        language:
+          type: string
+          description: Language of server-generated text (e.g. push notifications).
+        parallel_timer_action:
+          allOf:
+          - $ref: '#/components/schemas/ParallelTimerAction'
+        detection_parallel_timer_action:
+          allOf:
+          - $ref: '#/components/schemas/ParallelTimerAction'
+        long_timer_reminder_minutes:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Remind on all devices when a timer runs this long. null = off.
+        idle_threshold_minutes:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Minutes without activity that count as idle. null = idle detection off.
+        idle_action:
+          allOf:
+          - $ref: '#/components/schemas/IdleAction'
+        auto_stop_after_minutes:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: 'Hard limit: stop any timer running this long. null = off.'
+        not_tracking_reminder:
+          type: boolean
+          description: Remind if nothing is tracked during active hours.
+        active_hours_start:
+          type: integer
+          minimum: 0
+          maximum: 1439
+          nullable: true
+          description: Minutes after local midnight (540 = 09:00).
+        active_hours_end:
+          type: integer
+          minimum: 0
+          maximum: 1439
+          nullable: true
+          description: Minutes after local midnight (1020 = 17:00).
+        active_days:
+          type: integer
+          minimum: 0
+          maximum: 127
+          description: 'Bitmask: bit 0 = Monday ... bit 6 = Sunday.'
+        auto_start_breaks:
+          type: boolean
+        auto_start_next_work:
+          type: boolean
+        notify_phase_end:
+          type: boolean
+          description: Push when a Pomodoro phase or countdown ends.
+        quiet_hours_start:
+          type: integer
+          minimum: 0
+          maximum: 1439
+          nullable: true
+          description: Minutes after local midnight; no pushes between start and end. null = off.
+        quiet_hours_end:
+          type: integer
+          minimum: 0
+          maximum: 1439
+          nullable: true
+          description: Minutes after local midnight.
+        share_running_timer:
+          type: boolean
+          description: Group members can see what I am tracking now.
+        client_prefs:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: Client-only cosmetic prefs (theme, default screen). Last write wins.
+    Settings:
+      allOf:
+      - $ref: '#/components/schemas/SettingsFields'
+      - type: object
+        required:
+        - timezone
+        - week_start
+        - language
+        - parallel_timer_action
+        - detection_parallel_timer_action
+        - long_timer_reminder_minutes
+        - idle_threshold_minutes
+        - idle_action
+        - auto_stop_after_minutes
+        - not_tracking_reminder
+        - active_hours_start
+        - active_hours_end
+        - active_days
+        - auto_start_breaks
+        - auto_start_next_work
+        - notify_phase_end
+        - quiet_hours_start
+        - quiet_hours_end
+        - share_running_timer
+        - client_prefs
+        - updated_at
+        properties:
+          updated_at:
+            type: string
+            format: date-time
+    SyncEntityType:
+      type: string
+      enum:
+      - project
+      - task
+      - label
+      - work_session
+      - time_entry
+      - time_block_template
+      - location
+      - detection_rule
+      - group
+      - settings
+    SyncChange:
+      type: object
+      required:
+      - server_version
+      - entity_type
+      - id
+      - operation
+      - data
+      properties:
+        server_version:
+          type: integer
+          format: int64
+          minimum: 0
+        entity_type:
+          $ref: '#/components/schemas/SyncEntityType'
+        id:
+          type: string
+          description: Resource UUID; for settings, the user id.
+        operation:
+          type: string
+          enum:
+          - upsert
+          - delete
+          description: 'delete = tombstone: remove it from active lists but keep it for history.'
+        data:
+          type: object
+          additionalProperties: true
+          description: The same representation the resource's GET returns (entity_type tells which schema). Tombstones 
+            also carry it, with deleted_at set, so clients can still label history (e.g. time entries of a deleted 
+            project).
+    SyncPage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SyncChange'
+        next_cursor:
+          type: integer
+          format: int64
+          nullable: true
+          description: server_version to pass as `since` next; null when caught up.
+    HealthResponse:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          example: ok
+    DebugHealthResponse:
+      type: object
+      required:
+      - status
+      - database
+      - version
+      - uptime_seconds
+      properties:
+        status:
+          type: string
+        database:
+          type: object
+          additionalProperties: true
+        version:
+          type: string
+        uptime_seconds:
+          type: number
+          minimum: 0
+  responses:
+    BadRequest:
+      description: Malformed request or failed validation (including cross-resource rules).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing, expired or revoked token, or wrong credentials on login.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Authenticated but not allowed (not owner, not admin, wrong invite code).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Not found, deleted, or not visible to the caller.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Conflicts with current state (reused id with different content, taken username, owner leaving, 
+        location still in use).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Gone:
+      description: '`since` predates the 90-day tombstone window; wipe local data and do a full sync.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds until retry.
+    ServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+

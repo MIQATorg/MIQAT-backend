@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -22,13 +23,18 @@ type Primary struct{
 }
 
 type ServerConfig struct{
+    Host string `koanf:"host" validate:"required"`
     Port string `koanf:"port" validate:"required"`
-    ReadTimeout int `koanf:"read_timeout" validate:"required"`
-    WriteTimeout int `koanf:"write_timeout" validate:"required"`
-    IdleTimeout int `koanf:"idle_timeout" validate:"required"`
+    ReadTimeout int64 `koanf:"read_timeout" validate:"required"`
+    WriteTimeout int64 `koanf:"write_timeout" validate:"required"`
+    IdleTimeout int64 `koanf:"idle_timeout" validate:"required"`
     CORSAllowedOrigins []string `koanf:"cors_allowed_origins" validate:"required"`
 }
 
+func (s ServerConfig) GetAddr() string {
+    return fmt.Sprintf("%s:%s",s.Host,s.Port)
+
+}
 type DatabaseConfig struct {
     Host            string `koanf:"host" validate:"required"`
 	Port            int    `koanf:"port" validate:"required"`
@@ -43,16 +49,27 @@ type DatabaseConfig struct {
 }
 
 
+func (d DatabaseConfig) GetConnString() string {
+    return fmt.Sprintf(
+        "postgres://%s:%s@%s:%d/%s?sslmode=%s",
+        d.User,
+        d.Password,
+        d.Host,
+        d.Port,
+        d.Name,
+        d.SSLMode,
+    )
+}
+
 type LoggingConfig struct {
 	Level              string        `koanf:"level" validate:"required"`
     Format             string       `koanf:"format" validate:"required"`
 }
 
-
-func loadConfig() (*Config, error){ 
+func LoadConfig() (*Config){ 
     var k = koanf.New(".")
     if err := k.Load(file.Provider("config.yaml"), yaml.Parser()); err != nil {
-		slog.Error("error loading config: %v", err)
+		slog.Error("error loading config:","error",err)
         os.Exit(1)
 	}
 
@@ -71,7 +88,7 @@ func loadConfig() (*Config, error){
         os.Exit(1)
 	}
 
-    return &config,nil
+    return &config
 
 }
 

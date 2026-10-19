@@ -8,7 +8,7 @@ import (
 
 
 
-func CreateLogger(cfg config.Config) (*slog.Logger){
+func SetLogger(cfg config.Config){
     level := cfg.GetLogLevel()
     logLevel:= new(slog.LevelVar)
     var logger *slog.Logger
@@ -35,7 +35,6 @@ func CreateLogger(cfg config.Config) (*slog.Logger){
 	}
 
 	logger = slog.New(handler).With("Application","MIQAT")
-
-	return logger
+    slog.SetDefault(logger)
 }
 

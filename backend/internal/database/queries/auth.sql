@@ -1,8 +1,8 @@
--- name: userExists :one
+-- name: UserExists :one
 SELECT EXISTS(SELECT 1 FROM users WHERE username = $1);
 
--- name: getUsers :many
-SELECT * FROM users ORDER BY id;
+-- name: IsAdminStored :one
+SELECT EXISTS(SELECT 1 FROM users WHERE role = 'admin');
 
 -- name: GetUserForLogin :one
 SELECT id, username, display_name, password_hash, role
@@ -14,7 +14,7 @@ SELECT id, username, display_name, role
 FROM users
 WHERE id = $1;
 
--- name: registerUser :one
+-- name: RegisterUser :one
 INSERT INTO users (username,display_name,password_hash,role) VALUES ($1,$2,$3,$4)
 RETURNING *;
 
@@ -44,19 +44,19 @@ ORDER BY expires_at DESC;
 -- name: deleteUserById :exec
 DELETE FROM users where id=$1;
 
--- name: deleteUserByUsername :exec
+-- name: DeleteUserByUsername :exec
 DELETE FROM users where username=$1;
 
--- name: revokeSessionById :exec
+-- name: RevokeSessionById :exec
 DELETE FROM login_sessions where id=$1 AND user_id=$2;
 
--- name: revokeSessionByToken :exec
+-- name: RevokeSessionByToken :exec
 DELETE FROM login_sessions where token_hash=$1;
 
--- name: revokeAllUserSessions :exec
+-- name: RevokeAllUserSessions :exec
 DELETE FROM login_sessions where user_id=$1;
 
--- name: revokeUserSessionByUserAgent :exec
+-- name: RevokeUserSessionByUserAgent :exec
 DELETE FROM login_sessions where user_id=$1 AND user_agent=$2;
 
 

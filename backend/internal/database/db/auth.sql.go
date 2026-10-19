@@ -62,6 +62,15 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (L
 	return i, err
 }
 
+const deleteUserByUsername = `-- name: DeleteUserByUsername :exec
+DELETE FROM users where username=$1
+`
+
+func (q *Queries) DeleteUserByUsername(ctx context.Context, username string) error {
+	_, err := q.db.Exec(ctx, deleteUserByUsername, username)
+	return err
+}
+
 const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
 SELECT id, user_id, user_agent, kind, platform, expires_at
 FROM login_sessions
@@ -144,6 +153,17 @@ func (q *Queries) GetUserForLogin(ctx context.Context, username string) (GetUser
 	return i, err
 }
 
+const isAdminStored = `-- name: IsAdminStored :one
+SELECT EXISTS(SELECT 1 FROM users WHERE role = 'admin')
+`
+
+func (q *Queries) IsAdminStored(ctx context.Context) (bool, error) {
+	row := q.db.QueryRow(ctx, isAdminStored)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listUserSessions = `-- name: ListUserSessions :many
 SELECT id, user_agent, kind, platform, expires_at
 FROM login_sessions
@@ -186,69 +206,19 @@ func (q *Queries) ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Lis
 	return items, nil
 }
 
-const deleteUserById = `-- name: deleteUserById :exec
-DELETE FROM users where id=$1
-`
-
-func (q *Queries) deleteUserById(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteUserById, id)
-	return err
-}
-
-const deleteUserByUsername = `-- name: deleteUserByUsername :exec
-DELETE FROM users where username=$1
-`
-
-func (q *Queries) deleteUserByUsername(ctx context.Context, username string) error {
-	_, err := q.db.Exec(ctx, deleteUserByUsername, username)
-	return err
-}
-
-const getUsers = `-- name: getUsers :many
-SELECT id, username, display_name, password_hash, role, created_at, updated_at FROM users ORDER BY id
-`
-
-func (q *Queries) getUsers(ctx context.Context) ([]User, error) {
-	rows, err := q.db.Query(ctx, getUsers)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []User{}
-	for rows.Next() {
-		var i User
-		if err := rows.Scan(
-			&i.ID,
-			&i.Username,
-			&i.DisplayName,
-			&i.PasswordHash,
-			&i.Role,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const registerUser = `-- name: registerUser :one
+const registerUser = `-- name: RegisterUser :one
 INSERT INTO users (username,display_name,password_hash,role) VALUES ($1,$2,$3,$4)
 RETURNING id, username, display_name, password_hash, role, created_at, updated_at
 `
 
-type registerUserParams struct {
+type RegisterUserParams struct {
 	Username     string
 	DisplayName  string
 	PasswordHash pgtype.Text
 	Role         UserRole
 }
 
-func (q *Queries) registerUser(ctx context.Context, arg registerUserParams) (User, error) {
+func (q *Queries) RegisterUser(ctx context.Context, arg RegisterUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, registerUser,
 		arg.Username,
 		arg.DisplayName,
@@ -268,59 +238,68 @@ func (q *Queries) registerUser(ctx context.Context, arg registerUserParams) (Use
 	return i, err
 }
 
-const revokeAllUserSessions = `-- name: revokeAllUserSessions :exec
+const revokeAllUserSessions = `-- name: RevokeAllUserSessions :exec
 DELETE FROM login_sessions where user_id=$1
 `
 
-func (q *Queries) revokeAllUserSessions(ctx context.Context, userID uuid.UUID) error {
+func (q *Queries) RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, revokeAllUserSessions, userID)
 	return err
 }
 
-const revokeSessionById = `-- name: revokeSessionById :exec
+const revokeSessionById = `-- name: RevokeSessionById :exec
 DELETE FROM login_sessions where id=$1 AND user_id=$2
 `
 
-type revokeSessionByIdParams struct {
+type RevokeSessionByIdParams struct {
 	ID     uuid.UUID
 	UserID uuid.UUID
 }
 
-func (q *Queries) revokeSessionById(ctx context.Context, arg revokeSessionByIdParams) error {
+func (q *Queries) RevokeSessionById(ctx context.Context, arg RevokeSessionByIdParams) error {
 	_, err := q.db.Exec(ctx, revokeSessionById, arg.ID, arg.UserID)
 	return err
 }
 
-const revokeSessionByToken = `-- name: revokeSessionByToken :exec
+const revokeSessionByToken = `-- name: RevokeSessionByToken :exec
 DELETE FROM login_sessions where token_hash=$1
 `
 
-func (q *Queries) revokeSessionByToken(ctx context.Context, tokenHash string) error {
+func (q *Queries) RevokeSessionByToken(ctx context.Context, tokenHash string) error {
 	_, err := q.db.Exec(ctx, revokeSessionByToken, tokenHash)
 	return err
 }
 
-const revokeUserSessionByUserAgent = `-- name: revokeUserSessionByUserAgent :exec
+const revokeUserSessionByUserAgent = `-- name: RevokeUserSessionByUserAgent :exec
 DELETE FROM login_sessions where user_id=$1 AND user_agent=$2
 `
 
-type revokeUserSessionByUserAgentParams struct {
+type RevokeUserSessionByUserAgentParams struct {
 	UserID    uuid.UUID
 	UserAgent string
 }
 
-func (q *Queries) revokeUserSessionByUserAgent(ctx context.Context, arg revokeUserSessionByUserAgentParams) error {
+func (q *Queries) RevokeUserSessionByUserAgent(ctx context.Context, arg RevokeUserSessionByUserAgentParams) error {
 	_, err := q.db.Exec(ctx, revokeUserSessionByUserAgent, arg.UserID, arg.UserAgent)
 	return err
 }
 
-const userExists = `-- name: userExists :one
+const userExists = `-- name: UserExists :one
 SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)
 `
 
-func (q *Queries) userExists(ctx context.Context, username string) (bool, error) {
+func (q *Queries) UserExists(ctx context.Context, username string) (bool, error) {
 	row := q.db.QueryRow(ctx, userExists, username)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const deleteUserById = `-- name: deleteUserById :exec
+DELETE FROM users where id=$1
+`
+
+func (q *Queries) deleteUserById(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUserById, id)
+	return err
 }

@@ -66,12 +66,13 @@ CREATE TYPE "member_role" AS ENUM (
 
 CREATE TABLE "users" (
   "id" uuid PRIMARY KEY DEFAULT uuidv7(),
-  "username" varchar UNIQUE NOT NULL,
+  "username" varchar(30) UNIQUE NOT NULL,
   "display_name" varchar NOT NULL,
   "password_hash" varchar,
   "role" user_role NOT NULL DEFAULT 'user',
   "created_at" timestamptz NOT NULL DEFAULT (now()),
-  "updated_at" timestamptz NOT NULL DEFAULT (now())
+  "updated_at" timestamptz NOT NULL DEFAULT (now()),
+  CONSTRAINT ck_English_Only CHECK (username ~ '^[A-Za-z0-9_]*$' AND display_name ~ '^[A-Za-z0-9 ]*$' )
 );
 
 CREATE TABLE "login_sessions" (

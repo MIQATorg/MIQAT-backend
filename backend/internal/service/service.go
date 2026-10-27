@@ -1,7 +1,4 @@
 package service
 
-
-
-type service struct{
-
+type service struct {
 }

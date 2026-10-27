@@ -1,9 +1,0 @@
-package miqat
-
-
-
-
-func main(){
-
-}
-

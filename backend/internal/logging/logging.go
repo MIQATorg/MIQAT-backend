@@ -1,32 +1,30 @@
-package logging 
+package logging
 
 import (
-	"log/slog"
-    "os"
 	"github.com/MIQATorg/MIQAT-backend/internal/config"
+	"log/slog"
+	"os"
 )
 
-
-
-func SetLogger(cfg config.Config){
-    level := cfg.GetLogLevel()
-    logLevel:= new(slog.LevelVar)
-    var logger *slog.Logger
-    switch (level){
-    case "debug":
-        logLevel.Set(slog.LevelDebug)
+func SetLogger(cfg config.Config) {
+	level := cfg.GetLogLevel()
+	logLevel := new(slog.LevelVar)
+	var logger *slog.Logger
+	switch level {
+	case "debug":
+		logLevel.Set(slog.LevelDebug)
 	case "info":
-        logLevel.Set(slog.LevelInfo) 
+		logLevel.Set(slog.LevelInfo)
 	case "error":
-        logLevel.Set(slog.LevelError)
+		logLevel.Set(slog.LevelError)
 	default:
-        logLevel.Set(slog.LevelInfo) 
+		logLevel.Set(slog.LevelInfo)
 	}
-    opts := &slog.HandlerOptions{
+	opts := &slog.HandlerOptions{
 		Level: logLevel,
 	}
 
-    var handler slog.Handler
+	var handler slog.Handler
 
 	if cfg.IsProduction() && cfg.Logging.Format == "json" {
 		handler = slog.NewJSONHandler(os.Stdout, opts)
@@ -34,7 +32,6 @@ func SetLogger(cfg config.Config){
 		handler = slog.NewTextHandler(os.Stdout, opts)
 	}
 
-	logger = slog.New(handler).With("Application","MIQAT")
-    slog.SetDefault(logger)
+	logger = slog.New(handler).With("Application", "MIQAT")
+	slog.SetDefault(logger)
 }
-

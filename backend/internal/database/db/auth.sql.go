@@ -62,6 +62,20 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (L
 	return i, err
 }
 
+const createUserSettings = `-- name: CreateUserSettings :exec
+INSERT INTO user_settings(user_id,timezone) VALUES($1,$2)
+`
+
+type CreateUserSettingsParams struct {
+	UserID   uuid.UUID
+	Timezone string
+}
+
+func (q *Queries) CreateUserSettings(ctx context.Context, arg CreateUserSettingsParams) error {
+	_, err := q.db.Exec(ctx, createUserSettings, arg.UserID, arg.Timezone)
+	return err
+}
+
 const deleteUserByUsername = `-- name: DeleteUserByUsername :exec
 DELETE FROM users where username=$1
 `
@@ -72,85 +86,102 @@ func (q *Queries) DeleteUserByUsername(ctx context.Context, username string) err
 }
 
 const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
-SELECT id, user_id, user_agent, kind, platform, expires_at
+SELECT id, user_agent, user_id, kind, token_hash, platform, app_version, created_at, last_used_at, expires_at, revoked_at, push_topic
 FROM login_sessions
 WHERE token_hash = $1
-  AND expires_at > NOW()
+  AND expires_at > NOW() AND revoked_at IS NULL
 `
 
-type GetSessionByTokenHashRow struct {
-	ID        uuid.UUID
-	UserID    uuid.UUID
-	UserAgent string
-	Kind      SessionKind
-	Platform  Platform
-	ExpiresAt time.Time
-}
-
-func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (GetSessionByTokenHashRow, error) {
+func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (LoginSession, error) {
 	row := q.db.QueryRow(ctx, getSessionByTokenHash, tokenHash)
-	var i GetSessionByTokenHashRow
+	var i LoginSession
 	err := row.Scan(
 		&i.ID,
-		&i.UserID,
 		&i.UserAgent,
+		&i.UserID,
 		&i.Kind,
+		&i.TokenHash,
 		&i.Platform,
+		&i.AppVersion,
+		&i.CreatedAt,
+		&i.LastUsedAt,
 		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.PushTopic,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, display_name, role
+SELECT id, username, display_name, password_hash, role, created_at, updated_at 
 FROM users
 WHERE id = $1
 `
 
-type GetUserByIDRow struct {
-	ID          uuid.UUID
-	Username    string
-	DisplayName string
-	Role        UserRole
-}
-
-func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow, error) {
+func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByID, id)
-	var i GetUserByIDRow
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
-		&i.DisplayName,
-		&i.Role,
-	)
-	return i, err
-}
-
-const getUserForLogin = `-- name: GetUserForLogin :one
-SELECT id, username, display_name, password_hash, role
-FROM users
-WHERE username = $1
-`
-
-type GetUserForLoginRow struct {
-	ID           uuid.UUID
-	Username     string
-	DisplayName  string
-	PasswordHash pgtype.Text
-	Role         UserRole
-}
-
-func (q *Queries) GetUserForLogin(ctx context.Context, username string) (GetUserForLoginRow, error) {
-	row := q.db.QueryRow(ctx, getUserForLogin, username)
-	var i GetUserForLoginRow
+	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
 		&i.DisplayName,
 		&i.PasswordHash,
 		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getUserBySessionTokenHash = `-- name: GetUserBySessionTokenHash :one
+SELECT id, username, display_name, password_hash, role, created_at, updated_at FROM users where id = (SELECT user_id FROM login_sessions where token_hash = $1 AND revoked_at IS NULL and expires_at > NOW())
+`
+
+func (q *Queries) GetUserBySessionTokenHash(ctx context.Context, tokenHash string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserBySessionTokenHash, tokenHash)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserForLogin = `-- name: GetUserForLogin :one
+SELECT id, username, display_name, password_hash, role, created_at, updated_at
+FROM users
+WHERE username = $1
+`
+
+func (q *Queries) GetUserForLogin(ctx context.Context, username string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserForLogin, username)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserRoleById = `-- name: GetUserRoleById :one
+SELECT role from users where id = $1
+`
+
+func (q *Queries) GetUserRoleById(ctx context.Context, id uuid.UUID) (UserRole, error) {
+	row := q.db.QueryRow(ctx, getUserRoleById, id)
+	var role UserRole
+	err := row.Scan(&role)
+	return role, err
 }
 
 const isAdminStored = `-- name: IsAdminStored :one
@@ -159,6 +190,28 @@ SELECT EXISTS(SELECT 1 FROM users WHERE role = 'admin')
 
 func (q *Queries) IsAdminStored(ctx context.Context) (bool, error) {
 	row := q.db.QueryRow(ctx, isAdminStored)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const isUserExistsById = `-- name: IsUserExistsById :one
+SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)
+`
+
+func (q *Queries) IsUserExistsById(ctx context.Context, id uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, isUserExistsById, id)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const isUserExistsByUsername = `-- name: IsUserExistsByUsername :one
+SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)
+`
+
+func (q *Queries) IsUserExistsByUsername(ctx context.Context, username string) (bool, error) {
+	row := q.db.QueryRow(ctx, isUserExistsByUsername, username)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
@@ -239,7 +292,9 @@ func (q *Queries) RegisterUser(ctx context.Context, arg RegisterUserParams) (Use
 }
 
 const revokeAllUserSessions = `-- name: RevokeAllUserSessions :exec
-DELETE FROM login_sessions where user_id=$1
+UPDATE login_sessions
+SET revoked_at = NOW()
+WHERE user_id = $1 AND revoked_at IS NULL
 `
 
 func (q *Queries) RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error {
@@ -247,8 +302,11 @@ func (q *Queries) RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) e
 	return err
 }
 
-const revokeSessionById = `-- name: RevokeSessionById :exec
-DELETE FROM login_sessions where id=$1 AND user_id=$2
+const revokeSessionById = `-- name: RevokeSessionById :one
+UPDATE login_sessions
+SET revoked_at = NOW()
+WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+RETURNING id, user_agent, user_id, kind, token_hash, platform, app_version, created_at, last_used_at, expires_at, revoked_at, push_topic
 `
 
 type RevokeSessionByIdParams struct {
@@ -256,22 +314,59 @@ type RevokeSessionByIdParams struct {
 	UserID uuid.UUID
 }
 
-func (q *Queries) RevokeSessionById(ctx context.Context, arg RevokeSessionByIdParams) error {
-	_, err := q.db.Exec(ctx, revokeSessionById, arg.ID, arg.UserID)
-	return err
+func (q *Queries) RevokeSessionById(ctx context.Context, arg RevokeSessionByIdParams) (LoginSession, error) {
+	row := q.db.QueryRow(ctx, revokeSessionById, arg.ID, arg.UserID)
+	var i LoginSession
+	err := row.Scan(
+		&i.ID,
+		&i.UserAgent,
+		&i.UserID,
+		&i.Kind,
+		&i.TokenHash,
+		&i.Platform,
+		&i.AppVersion,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.PushTopic,
+	)
+	return i, err
 }
 
-const revokeSessionByToken = `-- name: RevokeSessionByToken :exec
-DELETE FROM login_sessions where token_hash=$1
+const revokeSessionByToken = `-- name: RevokeSessionByToken :one
+UPDATE login_sessions
+SET revoked_at = NOW()
+WHERE token_hash = $1 AND revoked_at IS NULL
+RETURNING id, user_agent, user_id, kind, token_hash, platform, app_version, created_at, last_used_at, expires_at, revoked_at, push_topic
 `
 
-func (q *Queries) RevokeSessionByToken(ctx context.Context, tokenHash string) error {
-	_, err := q.db.Exec(ctx, revokeSessionByToken, tokenHash)
-	return err
+func (q *Queries) RevokeSessionByToken(ctx context.Context, tokenHash string) (LoginSession, error) {
+	row := q.db.QueryRow(ctx, revokeSessionByToken, tokenHash)
+	var i LoginSession
+	err := row.Scan(
+		&i.ID,
+		&i.UserAgent,
+		&i.UserID,
+		&i.Kind,
+		&i.TokenHash,
+		&i.Platform,
+		&i.AppVersion,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.PushTopic,
+	)
+	return i, err
 }
 
 const revokeUserSessionByUserAgent = `-- name: RevokeUserSessionByUserAgent :exec
-DELETE FROM login_sessions where user_id=$1 AND user_agent=$2
+UPDATE login_sessions
+SET revoked_at = NOW()
+WHERE user_id = $1
+  AND user_agent = $2
+  AND revoked_at IS NULL
 `
 
 type RevokeUserSessionByUserAgentParams struct {
@@ -282,17 +377,6 @@ type RevokeUserSessionByUserAgentParams struct {
 func (q *Queries) RevokeUserSessionByUserAgent(ctx context.Context, arg RevokeUserSessionByUserAgentParams) error {
 	_, err := q.db.Exec(ctx, revokeUserSessionByUserAgent, arg.UserID, arg.UserAgent)
 	return err
-}
-
-const userExists = `-- name: UserExists :one
-SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)
-`
-
-func (q *Queries) UserExists(ctx context.Context, username string) (bool, error) {
-	row := q.db.QueryRow(ctx, userExists, username)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
 }
 
 const deleteUserById = `-- name: deleteUserById :exec

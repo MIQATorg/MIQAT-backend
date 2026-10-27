@@ -21,7 +21,6 @@ func main() {
 	api.Database = database.NewDatabase(ctx, cfg)
 	api.Database.Queries = db.New(api.Database.Pool)
 
-
 	if err := api.Run(api.Mount()); err != nil {
 		slog.Error("Server has failed to start", "error", err)
 		os.Exit(1)

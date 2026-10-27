@@ -1,5 +1,6 @@
 primary:
   env: development # development or production
+  domain: "localhost"
 
 server:
   host: "127.0.0.1"

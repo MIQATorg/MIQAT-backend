@@ -30,9 +30,9 @@ type HTTPError struct {
 	Action *Action `json:"action"`
 }
 
-
 func (e *HTTPError) Error() string {
-	return e.Message}
+	return e.Message
+}
 
 func (e *HTTPError) WithMessage(message string) *HTTPError {
 	return &HTTPError{

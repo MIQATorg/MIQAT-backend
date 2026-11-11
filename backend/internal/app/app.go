@@ -46,9 +46,7 @@ func (app *Application) Mount() http.Handler {
 	protected := r.Group("/")
 	{
 		protected.Use(authHandler.AuthorizerMiddleware())
-		protected.GET("/hello", func(c *gin.Context) {
-			c.String(http.StatusOK, "Hello, World!")
-		})
+		protected.GET("/me", authHandler.GetMe)
 	}
 
 	r.Use(authHandler.RoleIdentifierMiddleware())

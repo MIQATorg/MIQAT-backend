@@ -245,6 +245,14 @@ func (s *AuthService) isUserExistsByUsername(ctx context.Context, username strin
 	}
 	return exists, nil
 }
+func (s *AuthService) GetUserByID(ctx context.Context, id string) (db.User, error) {
+	userID, err := uuid.Parse(id)
+	if err != nil {
+		return db.User{}, err
+	}
+
+	return s.repo.GetUserByID(ctx, userID)
+}
 
 func (s *AuthService) GetUserBySessionToken(ctx context.Context, tokenbase64 string) (db.User, error) {
 	if tokenbase64 == "" {

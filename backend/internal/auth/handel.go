@@ -41,7 +41,7 @@ func (h *AuthHandler) RegisterUser(c *gin.Context) {
 
 func (h *AuthHandler) Logout(c *gin.Context) {
 
-	TokenBase64 := tokenFrom(c)
+	TokenBase64 := TokenFrom(c)
 	if TokenBase64 == "" {
 		helpers.WriteError(c.Writer, errs.NewBadFormatError())
 		return
@@ -76,4 +76,26 @@ func (h *AuthHandler) LoginUser(c *gin.Context) {
 	}
 
 	c.Status(http.StatusOK)
+}
+
+func (h *AuthHandler) GetMe(c *gin.Context) {
+
+	userID, ok := c.Request.Context().Value(AuthorizedContextKey).(string)
+	if !ok {
+		helpers.WriteError(c.Writer, errs.NewUnAuthorizedToken())
+		return
+	}
+	user, err := h.srvc.GetUserByID(c.Request.Context(), userID)
+	if err != nil {
+		helpers.WriteError(c.Writer, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":           user.ID,
+		"username":     user.Username,
+		"display_name": user.DisplayName,
+		"role":         user.Role,
+		"created_at":   user.CreatedAt})
+
 }
